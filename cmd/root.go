@@ -23,6 +23,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -91,28 +92,22 @@ var rootCmd = &cobra.Command{
 		clusterName := viper.GetString("cluster-name")
 		logrus.Infof("Using Resource Group %q", clusterName)
 
-		done := make(chan string, 4)
+		done := make(chan string, 1)
 
-		executedeployKubeTest := func(ctx context.Context, includeValidation bool, podCidr *string, i uint8) {
+		executedeployKubeTest := func(ctx context.Context, includeValidation bool, np *containerservice.NetworkProfile, i uint8) {
 			updatedName := fmt.Sprintf("%s-%d", clusterName, i)
 
 			defer func() {
 				done <- updatedName
 			}()
 			logrus.Infof("starting deployment of cluster %q", updatedName)
-			if err := deployKubernetesCluster(ctx, auth, group, includeValidation, updatedName, podCidr, terraformDemoSSHPublicKey); err != nil {
+			if err := deployKubernetesCluster(ctx, auth, group, includeValidation, updatedName, np, terraformDemoSSHPublicKey); err != nil {
 				messageBuilder := bytes.NewBufferString("Failed to create cluster ")
 				fmt.Fprint(messageBuilder, updatedName)
-				fmt.Fprint(messageBuilder, " with PodCidr Value ")
-
-				if podCidr == nil {
-					fmt.Fprint(messageBuilder, "nil")
-				} else {
-					messageBuilder.WriteRune('"')
-					fmt.Fprint(messageBuilder, *podCidr)
-					messageBuilder.WriteRune('"')
-				}
-				messageBuilder.WriteString(": ")
+				fmt.Fprint(messageBuilder, "\n\tNetwork Profile:\n\t\t")
+				enc := json.NewEncoder(messageBuilder)
+				enc.Encode(np)
+				messageBuilder.WriteString("\tError: \n\t\t")
 				fmt.Fprint(messageBuilder, err)
 				logrus.Error(messageBuilder.String())
 				return
@@ -120,12 +115,11 @@ var rootCmd = &cobra.Command{
 			logrus.Info("finished deployment of cluster %q", updatedName)
 		}
 
-		executedeployKubeTest(ctx, true, nil, 0)
-		executedeployKubeTest(ctx, true, to.StringPtr(""), 1)
-		executedeployKubeTest(ctx, false, to.StringPtr(""), 2)
-		executedeployKubeTest(ctx, true, to.StringPtr("10.24.0.0/16"), 3)
+		executedeployKubeTest(ctx, true, &containerservice.NetworkProfile{
+			NetworkPlugin: containerservice.Azure,
+		}, 0)
 
-		for i := 0; i < 4; i++ {
+		for i := 0; i < 1; i++ {
 			select {
 			case <-ctx.Done():
 				logrus.Error("timed out")
@@ -246,7 +240,7 @@ func deleteResourceGroup(ctx context.Context, auth autorest.Authorizer, name str
 	return fut.WaitForCompletion(ctx, client.Client)
 }
 
-func deployKubernetesCluster(ctx context.Context, auth autorest.Authorizer, group resources.Group, includeValidation bool, name string, podCidr *string, publicKey string) error {
+func deployKubernetesCluster(ctx context.Context, auth autorest.Authorizer, group resources.Group, includeValidation bool, name string, np *containerservice.NetworkProfile, publicKey string) error {
 	client := containerservice.NewManagedClustersClient(viper.GetString("subscription-id"))
 	client.Authorizer = auth
 
@@ -272,13 +266,7 @@ func deployKubernetesCluster(ctx context.Context, auth autorest.Authorizer, grou
 					},
 				},
 			},
-			NetworkProfile: &containerservice.NetworkProfile{
-				NetworkPlugin:    containerservice.Azure,
-				DNSServiceIP:     to.StringPtr("10.10.0.10"),
-				DockerBridgeCidr: to.StringPtr("172.18.0.1/16"),
-				ServiceCidr:      to.StringPtr("10.10.0.0/16"),
-				PodCidr:          podCidr,
-			},
+			NetworkProfile: np,
 		},
 	}
 
