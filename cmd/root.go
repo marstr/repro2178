@@ -92,7 +92,7 @@ var rootCmd = &cobra.Command{
 		clusterName := viper.GetString("cluster-name")
 		logrus.Infof("Using Resource Group %q", clusterName)
 
-		done := make(chan string, 1)
+		done := make(chan string, 3)
 
 		executedeployKubeTest := func(ctx context.Context, includeValidation bool, np *containerservice.NetworkProfile, i uint8) {
 			updatedName := fmt.Sprintf("%s-%d", clusterName, i)
@@ -118,8 +118,16 @@ var rootCmd = &cobra.Command{
 		executedeployKubeTest(ctx, true, &containerservice.NetworkProfile{
 			NetworkPlugin: containerservice.Azure,
 		}, 0)
+		executedeployKubeTest(ctx, true, &containerservice.NetworkProfile{
+			NetworkPlugin: containerservice.Azure,
+			ServiceCidr:   to.StringPtr(""),
+		}, 1)
+		executedeployKubeTest(ctx, false, &containerservice.NetworkProfile{
+			NetworkPlugin: containerservice.Azure,
+			ServiceCidr:   to.StringPtr(""),
+		}, 2)
 
-		for i := 0; i < 1; i++ {
+		for i := 0; i < 3; i++ {
 			select {
 			case <-ctx.Done():
 				logrus.Error("timed out")
