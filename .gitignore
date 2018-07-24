@@ -1,0 +1,6 @@
+# Dependencies
+vendor/
+
+# Build products
+*.exe
+repro2178
